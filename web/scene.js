@@ -4049,6 +4049,26 @@ Scene.operators = {
     "modulo": function modulo(v1,v2,line) { return num(v1,line) % num(v2,line); },
 };
 
+
+// Personal Commands
+
+// *alert
+Scene.prototype.alert = function scene_alert(text) {
+  if (typeof window != "undefined") {
+    var escapedText = text.replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/\[n\/\]/g, '<br>')
+      .replace(/\[b\]/g, '<b>')
+      .replace(/\[\/b\]/g, '</b>')
+      .replace(/\[i\]/g, '<i>')
+      .replace(/\[\/i\]/g, '</i>');
+    html = this.replaceVariables(escapedText.replace(/^ */, ""));
+    alertify.log(html);
+  }
+};
+
 Scene.initialCommands = {"create":1,"scene_list":1,"title":1,"author":1,"comment":1,"achievement":1,"product":1};
 
 Scene.validCommands = {"comment":1, "goto":1, "gotoref":1, "label":1, "looplimit":1, "finish":1, "abort":1,
@@ -4062,5 +4082,5 @@ Scene.validCommands = {"comment":1, "goto":1, "gotoref":1, "label":1, "looplimit
     "restart":1,"more_games":1,"delay_ending":1,"end_trial":1,"login":1,"achieve":1,"scene_list":1,"title":1,
     "bug":1,"link_button":1,"check_registration":1,"sound":1,"author":1,"gosub_scene":1,"achievement":1,
     "check_achievements":1,"redirect_scene":1,"print_discount":1,"purchase_discount":1,"track_event":1,
-    "timer":1,"youtube":1,"product":1,"text_image":1
+    "timer":1,"youtube":1,"product":1,"text_image":1,"alert":1
     };
