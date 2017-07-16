@@ -416,6 +416,13 @@ body.nightmode a.alertify-button {
   color: white;
 }
 
+body.nightmode .alertify-log {
+  background: #000;
+  background: rgba(255,255,255,.9);
+  color: #000;
+  text-shadow: -1px -1px 0 rgba(255,255,255,.5);
+}
+
 body.nightmode img.invert {
   -webkit-filter: invert(100%);
   filter: invert(100%);
@@ -431,6 +438,42 @@ body.whitemode .next {
 
 body.whitemode .next:hover {
   color: #ddd;
+}
+
+body.rosemode {
+  background-color: #ffe7f7;
+}
+
+body.rosemode .next {
+  color: #ffe7f7; /* Match background color */
+  /*background-color: #c94e8e; */
+}
+
+body.rosemode .shuttle {
+  background-color: #FC89AC;
+}
+
+body.rosemode .next:hover {
+  color: #f8d1dd;
+}
+
+body.rosemode a {
+  color: #379ffb;
+}
+
+body.rosemode .alertify {
+  color: black;
+}
+
+body.rosemode a.alertify-button {
+  color: white;
+}
+
+body.rosemode .alertify-log {
+  background: #000;
+  background: rgba(255,255,255,.9);
+  color: #000;
+  text-shadow: -1px -1px 0 rgba(255,255,255,.5);
 }
 
 @media only screen and (max-width: 480px) {

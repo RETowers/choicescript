@@ -264,6 +264,7 @@ function textOptionsMenu(categories) {
     if (categories.color) options.push(
       {name:"Use a black background.", group:"choice", color:"black"},
       {name:"Use a sepia background.", group:"choice", color:"sepia"},
+      {name:"Use a rose background.", group:"choice", color:"rose"},
       {name:"Use a white background.", group:"choice", color:"white"}
     );
     if (categories.animation) options.push(
@@ -330,12 +331,19 @@ function changeBackgroundColor(color) {
   if (color === "sepia") {
     document.body.classList.remove("nightmode");
     document.body.classList.remove("whitemode");
+    document.body.classList.remove("rosemode");
   } else if (color === "black") {
     document.body.classList.remove("whitemode");
+    document.body.classList.remove("rosemode");
     document.body.classList.add("nightmode");
   } else if (color === "white") {
     document.body.classList.remove("nightmode");
+    document.body.classList.remove("rosemode");
     document.body.classList.add("whitemode");
+  } else if (color === "rose") {
+    document.body.classList.remove("nightmode");
+    document.body.classList.remove("whitemode");
+    document.body.classList.add("rosemode");
   }
   if (initStore()) store.set("preferredBackground", color);
 }
@@ -3098,7 +3106,8 @@ if (window.isWeb) {
 if (!('ontouchstart' in window)) {
   document.getElementById("dynamic").innerHTML += ".choice label:hover {background-color: #E4DED8;}\n" +
     "body.nightmode .choice label:hover {background-color: #555;}\n"+
-    "body.whitemode .choice label:hover {background-color: #ddd;}\n";
+    "body.whitemode .choice label:hover {background-color: #ddd;}\n"+
+    "body.rosemode .choice label:hover {background-color: #f8d1dd;}\n";
 }
 function fixChromeLinks() {
   var aboutLink = document.getElementById("aboutLink");
