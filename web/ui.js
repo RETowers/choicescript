@@ -349,23 +349,8 @@ function changeBackgroundColor(color) {
   if (initStore()) store.set("preferredBackground", color);
 }
 
-<<<<<<< HEAD
-function returnBackgroundColor(classNameToTestFor) {
-    var classNames = document.body.className.split(' ');
-    for (var i = 0; i < classNames.length; i++) {
-        if (classNames[i].replace(/mode$/, "") !== classNames[i]) {
-          if (classNames[i] == "nightmode") {
-            return "black";
-          } else {
-            return classNames[i].replace(/mode$/, "");
-          }
-        }
-    }
-    return "sepia";
-=======
 function isNightMode() {
   return document.body.classList.contains("nightmode");
->>>>>>> dfabulich/master
 }
 
 function spell(num) {
