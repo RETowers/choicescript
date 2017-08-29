@@ -18,13 +18,16 @@
  */
 function Scene(name, stats, nav, options) {
     if (!name) name = "";
-    if (!stats) stats = {};
+    if (!stats) stats = {implicit_control_flow:false};
+    if (stats["implicit_control_flow"] === undefined) stats["implicit_control_flow"] = false;
     // the name of the scene
     this.name = name;
 
     // the permanent statistics and the temporary values
     this.stats = stats;
-    this.temps = {choice_reuse:"allow", choice_user_restored:false};
+    // implicit_control_flow controls whether goto is necessary to leave options (true means no)
+    // _choiceEnds stores the line numbers to jump to when choice #options end.
+    this.temps = {choice_reuse:"allow", choice_user_restored:false, _choiceEnds:{}};
 
     // the navigator determines which scene comes next
     this.nav = nav;
@@ -101,26 +104,21 @@ Scene.prototype.printLoop = function printLoop() {
         } else if (indent < this.indent) {
             this.dedent(indent);
         }
-        if (this.temps.fakeChoiceLines && this.temps.fakeChoiceLines[this.lineNum]) {
-          this.rollbackLineCoverage();
-          this.lineNum = this.temps.fakeChoiceEnd;
-          this.rollbackLineCoverage();
-          delete this.temps.fakeChoiceEnd;
-          delete this.temps.fakeChoiceLines;
-          continue;
+        // Ability to end a choice #option without goto is guarded by implicit_control_flow variable
+        if (this.temps._choiceEnds[this.lineNum] && 
+                (this.stats["implicit_control_flow"] || this.temps._fakeChoiceDepth > 0)) {
+            // Skip to the end of the choice if we hit the end of an #option
+            this.rollbackLineCoverage();
+            this.lineNum = this.temps._choiceEnds[this.lineNum];
+            this.rollbackLineCoverage();
+            if (this.temps._fakeChoiceDepth > 0) {
+                this.temps._fakeChoiceDepth--;
+            }
+            continue;
         }
         this.indent = indent;
         if (/^\s*#/.test(line)) {
-            if (this.temps.fakeChoiceEnd) {
-                this.rollbackLineCoverage();
-                this.lineNum = this.temps.fakeChoiceEnd;
-                this.rollbackLineCoverage();
-                delete this.temps.fakeChoiceEnd;
-                delete this.temps.fakeChoiceLines;
-                continue;
-            } else {
-                throw new Error(this.lineMsg() + "It is illegal to fall out of a *choice statement; you must *goto or *finish before the end of the indented block.");
-            }
+            throw new Error(this.lineMsg() + "It is illegal to fall out of a *choice statement; you must *goto or *finish before the end of the indented block.");
         }
         if (!this.runCommand(line)) {
             this.prevLine = "text";
@@ -498,7 +496,7 @@ Scene.prototype.checkSum = function checkSum(crc) {
     if (this.temps.choice_crc != crc) {
       // The scene has changed; restart the scene
       var userRestored = this.temps.choice_user_restored || false;
-      this.temps = {choice_reuse:"allow", choice_user_restored:userRestored, choice_crc: crc};
+      this.temps = {choice_reuse:"allow", choice_user_restored:userRestored, choice_crc: crc, _choiceEnds:{}};
       this.lineNum = 0;
       this.indent = 0;
     }
@@ -679,21 +677,23 @@ Scene.prototype.choice = function choice(data) {
       self.standardResolution(option);
     });
     this.finished = true;
-    if (this.fakeChoice) {
-      this.temps.fakeChoiceEnd = this.lineNum;
-      var fakeChoiceLines = {};
-      for (i = 0; i < options.length; i++) {
-        fakeChoiceLines[options[i].line-1] = 1;
+    if (this.temps._fakeChoiceDepth > 0 || this.stats["implicit_control_flow"]) {
+      if (!this.temps._choiceEnds) {
+        this.temps._choiceEnds = {};
       }
-      this.temps.fakeChoiceLines = fakeChoiceLines;
+      for (i = 0; i < options.length; i++) {
+        this.temps._choiceEnds[options[i].line-1] = this.lineNum;
+      }
     }
     this.lineNum = startLineNum;
 };
 
 Scene.prototype.fake_choice = function fake_choice(data) {
-    this.fakeChoice = true;
-    this.choice(data, true);
-    delete this.fakeChoice;
+    if (this.temps._fakeChoiceDepth === undefined) {
+        this.temps._fakeChoiceDepth = 0;
+    }
+    this.temps._fakeChoiceDepth++;
+    this.choice(data);
 };
 
 Scene.prototype.standardResolution = function(option) {
@@ -797,11 +797,25 @@ Scene.prototype["goto"] = function scene_goto(line) {
     }
 };
 
-Scene.prototype.gosub = function scene_gosub(label) {
+Scene.prototype.gosub = function scene_gosub(data) {
+    var label = /\S+/.exec(data)[0];
+    var rest = data.substring(label.length+1);
+    var args = [];
+    var stack = this.tokenizeExpr(rest);
+    while (stack.length) {
+      args.push(this.evaluateValueToken(stack.shift(), stack));
+    }
     if (!this.temps.choice_substack) {
       this.temps.choice_substack = [];
     }
     this.temps.choice_substack.push({lineNum: this.lineNum, indent: this.indent});
+    // Works exactly the same as gosub_scene, putting args in this.temps.param.
+    // This means there's no notion of scope - param acts more like "registers" that
+    // get clobbered the next time a sub is called.
+    // This may be more intuitive to non-programmers than idea of scope?  Especially
+    // if temp normally doesn't follow scoping rules.  gosub_scene can serve this function anyway.
+    // The params can be retrieved and put in named temps with "params" command.
+    this.temps.param = args;
     this["goto"](label);
 };
 
@@ -813,6 +827,35 @@ Scene.prototype.gosub_scene = function scene_gosub_scene(data) {
     this.goto_scene(data);
 };
 
+Scene.prototype.params = function scene_params(data) {
+    // Name the parameters passed by gosub/gosub_scene.
+    // Rules should be the same as for "create."
+    // All parameters, even those not named, exposed as param_1, param_2 etc.
+    var words = /\w+/.exec(data);
+    var nextParamNum = 1;
+    this.temps.param_count = this.temps.param.length;
+    while (words) {
+        var varName = words[0];
+        this.validateVariable(varName);
+        if (this.temps.param.length < 1) {
+            throw new Error(this.lineMsg() + "No parameter passed for " + varName);
+        }
+        var paramVal = this.temps.param.shift();
+        this.temps[varName] = paramVal;
+        this.temps["param_" + nextParamNum] = paramVal;
+        nextParamNum++;
+        data = data.substring(varName.length+1);
+        words = /\w+/.exec(data);
+    }
+    // All remaining params are anonymous, but you still have to say "params"
+    // if you want any of them.
+    while (this.temps.param.length > 0) {
+        var paramVal = this.temps.param.shift();
+        this.temps["param_" + nextParamNum] = paramVal;
+        nextParamNum++;
+    }
+};
+
 Scene.prototype["return"] = function scene_return() {
     var stackFrame;
     if (this.temps.choice_substack && this.temps.choice_substack.length) {
@@ -821,6 +864,12 @@ Scene.prototype["return"] = function scene_return() {
       this.indent = stackFrame.indent;
     } else if (this.stats.choice_subscene_stack && this.stats.choice_subscene_stack.length) {
       stackFrame = this.stats.choice_subscene_stack.pop();
+      if (stackFrame.name == this.name) {
+        this.temps = stackFrame.temps;
+        this.lineNum = stackFrame.lineNum-1;
+        this.indent = stackFrame.indent;
+        return;
+      }
       this.finished = true;
       this.skipFooter = true;
       var scene = new Scene(stackFrame.name, this.stats, this.nav, {debugMode:this.debugMode, secondaryMode:this.secondaryMode, saveSlot:this.saveSlot});
@@ -908,32 +957,49 @@ Scene.prototype.reset = function reset() {
 };
 
 Scene.prototype.parseGotoScene = function parseGotoScene(data) {
-  var sceneName, label;
+  var sceneName, label, param = [], stack;
+
   if (/[\[\{]/.test(data)) {
-    var stack = this.tokenizeExpr(data);
+    stack = this.tokenizeExpr(data);
     sceneName = this.evaluateReference(stack, {toLowerCase: false});
+    // Labels are required for arguments to avoid ambiguity
     if (stack.length) {
       label = this.evaluateReference(stack);
     }
-    if (stack.length) {
-      throw new Error(this.lineMsg() + "Invalid *goto_scene command; nothing should appear after the label " + label);
+    while (stack.length) {
+      // Arguments when treating gosub_scene like a function call
+      param.push(this.evaluateValueToken(stack.shift(), stack));
     }
   } else {
-    var words = data.split(/ /);
-    sceneName = words[0];
-    if (words.length > 2) {
-      throw new Error(this.lineMsg() + "Invalid *goto_scene command; nothing should appear after the label " + words[1]);
-    } else if (words.length == 2) {
-      label = words[1];
+    // scenes and labels can contain hyphens and other non-expression punctuation
+    // so we'll try to extract the first two words as the scene and label
+    var match = /(\S+)\s+(\S+)\s*(.*)/.exec(data);
+    if (match) {
+      sceneName = match[1];
+      label = match[2];
+      stack = this.tokenizeExpr(match[3]);
+      while (stack.length) {
+        // Arguments when treating gosub_scene like a function call
+        param.push(this.evaluateValueToken(stack.shift(), stack));
+      }
+    } else {
+      sceneName = data;
     }
   }
-  return {sceneName:sceneName, label:label};
+  return {sceneName:sceneName, label:label, param:param};
 };
 
 // *goto_scene foo
 //
 Scene.prototype.goto_scene = function gotoScene(data) {
     var result = this.parseGotoScene(data);
+
+    if (result.sceneName == this.name) {
+      this["goto"](result.label);
+      this.temps = {choice_reuse:"allow", choice_user_restored:false, _choiceEnds:{}};
+      this.temps.param = result.param;
+      return;
+    }
 
     this.finished = true;
     this.skipFooter = true;
@@ -942,6 +1008,7 @@ Scene.prototype.goto_scene = function gotoScene(data) {
     scene.prevLine = this.prevLine;
     scene.accumulatedParagraph = this.accumulatedParagraph;
     if (typeof result.label != "undefined") scene.targetLabel = {label:result.label, origin:this.name, originLine:this.lineNum};
+    if (typeof result.param != "undefined") scene.temps.param = result.param;
     scene.execute();
 };
 
@@ -1260,6 +1327,11 @@ Scene.prototype.setVar = function setVar(variable, value) {
         }
         this.stats[variable] = value;
         if (this.saveSlot == "temp") tempStatWrites[variable] = value;
+        // Implicit control flow flag is ideally set just once in startup.
+        // Removing these lines makes this not possible with quicktest.
+        if (variable == "implicit_control_flow" && this.nav) {
+            this.nav.startingStats["implicit_control_flow"] = value;
+        }
     } else {
         this.temps[variable] = value;
     }
@@ -1287,6 +1359,7 @@ Scene.prototype.parseOptions = function parseOptions(startIndent, choicesRemaini
     // then the nextIndent is 4 for "spaceship"
     var nextIndent = null;
     var options = [];
+    var choiceEnds = [];
     var line;
     var currentChoice = choicesRemaining[0];
     if (!currentChoice) currentChoice = "choice";
@@ -1337,7 +1410,8 @@ Scene.prototype.parseOptions = function parseOptions(startIndent, choicesRemaini
             if (choicesRemaining.length>1 && !suboptionsEncountered) {
                 throw new Error(this.lineMsg() + "invalid indent, there were subchoices remaining: [" + choicesRemaining.join(",") + "]");
             }
-            if (bodyExpected && !this.fakeChoice) {
+            if (bodyExpected && 
+                    (this.temps._fakeChoiceDepth === undefined || this.temps._fakeChoiceDepth < 1)) {
                 throw new Error(this.lineMsg() + "Expected choice body");
             }
             if (!atLeastOneSelectableOption) this.conflictingOptions("line " + (startingLine+1) + ": No selectable options");
@@ -1348,6 +1422,9 @@ Scene.prototype.parseOptions = function parseOptions(startIndent, choicesRemaini
             prevOption = options[options.length-1];
             if (!prevOption.endLine) prevOption.endLine = this.lineNum;
             this.lineNum--;
+            for (i = 0; i < choiceEnds.length; i++) {
+                this.temps._choiceEnds[choiceEnds[i]] = this.lineNum;
+            }
             this.rollbackLineCoverage();
             return options;
         }
@@ -1417,6 +1494,7 @@ Scene.prototype.parseOptions = function parseOptions(startIndent, choicesRemaini
             } else if ("if" == command) {
               ifResult = this.parseOptionIf(data, command);
               if (ifResult) {
+                choiceEnds.push(this.lineNum);
                 inlineIf = ifResult.condition;
                 if (ifResult.result) {
                   line = ifResult.line;
@@ -1500,7 +1578,8 @@ Scene.prototype.parseOptions = function parseOptions(startIndent, choicesRemaini
         }
         if (!unselectable) atLeastOneSelectableOption = true;
     }
-    if (bodyExpected && !this.fakeChoice) {
+    if (bodyExpected && 
+            (this.temps._fakeChoiceDepth === undefined || this.temps._fakeChoiceDepth < 1)) {
         throw new Error(this.lineMsg() + "Expected choice body");
     }
     prevOption = options[options.length-1];
@@ -3297,7 +3376,9 @@ Scene.prototype.skipTrueBranch = function skipTrueBranch(inElse) {
 };
 
 Scene.prototype["else"] = Scene.prototype.elsif = Scene.prototype.elseif = function scene_else(data, inChoice) {
-    if (inChoice) {
+    // Authors can avoid using goto to get out of an if branch with:  *set implicit_control_flow true
+    // This avoids the error message at the end of the function.
+    if (inChoice || this.stats["implicit_control_flow"]) {
       this.skipTrueBranch(true);
       return;
     }
@@ -4113,5 +4194,5 @@ Scene.validCommands = {"comment":1, "goto":1, "gotoref":1, "label":1, "looplimit
     "restart":1,"more_games":1,"delay_ending":1,"end_trial":1,"login":1,"achieve":1,"scene_list":1,"title":1,
     "bug":1,"link_button":1,"check_registration":1,"sound":1,"author":1,"gosub_scene":1,"achievement":1,
     "check_achievements":1,"redirect_scene":1,"print_discount":1,"purchase_discount":1,"track_event":1,
-    "timer":1,"youtube":1,"product":1,"text_image":1
+    "timer":1,"youtube":1,"product":1,"text_image":1,"params":1
     };

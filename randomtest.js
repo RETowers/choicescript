@@ -500,7 +500,7 @@ Scene.prototype.purchase = function random_purchase(data) {
   if (typeof this.temps["choice_purchased_"+product] === "undefined") throw new Error(this.lineMsg() + "Didn't check_purchases on this page");
 };
 
-Scene.prototype.choice = function choice(data, fakeChoice) {
+Scene.prototype.choice = function choice(data) {
     var groups = ["choice"];
     if (data) groups = data.split(/ /);
     var choiceLine = this.lineNum;
@@ -511,13 +511,11 @@ Scene.prototype.choice = function choice(data, fakeChoice) {
     var index = chooseIndex(flattenedOptions, choiceLine, this.name);
 
     var item = flattenedOptions[index];
-    if (this.fakeChoice) {
-      this.temps.fakeChoiceEnd = this.lineNum;
-      var fakeChoiceLines = {};
-      for (var i = 0; i < options.length; i++) {
-        fakeChoiceLines[options[i].line-1] = 1;
-      };
-      this.temps.fakeChoiceLines = fakeChoiceLines;
+    if (!this.temps._choiceEnds) {
+        this.temps._choiceEnds = {};
+    }
+    for (i = 0; i < options.length; i++) {
+        this.temps._choiceEnds[options[i].line-1] = this.lineNum;
     }
     this.paragraph();
     var optionName = this.replaceVariables(item.ultimateOption.name);
@@ -683,7 +681,7 @@ function randomtestAsync(i, showCoverage) {
 function randomtest() {
   var start = new Date().getTime();
   randomSeed *= 1;
-  for (i = 0; i < iterations; i++) {
+  for (var i = 0; i < iterations; i++) {
     console.log("*****Seed " + (i+randomSeed));
     nav.resetStats(stats);
     timeout = null;
@@ -717,7 +715,7 @@ function randomtest() {
   if (!processExit) {
     if (showText) console.log("Word count: " + wordCount);
     if (showCoverage) {
-      for (i = 0; i < sceneNames.length; i++) {
+      for (var i = 0; i < sceneNames.length; i++) {
         var sceneName = sceneNames[i];
         var sceneLines = slurpFileLines('web/'+gameName+'/scenes/'+sceneName+'.txt');
         var sceneCoverage = coverage[sceneName];
